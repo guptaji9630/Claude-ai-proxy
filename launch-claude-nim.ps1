@@ -102,7 +102,7 @@ Write-Host ""
 
 # Set up environment variables
 Write-Host "Step 3: Configuring environment..." @Yellow
-$env:ANTHROPIC_API_BASE_URL = "http://localhost:3000"
+$env:ANTHROPIC_BASE_URL = "http://localhost:3000"
 $env:ANTHROPIC_API_KEY = "proxy-key"
 Write-Host "✅ Environment configured" @Green
 Write-Host "   - API Base URL: http://localhost:3000" @Cyan

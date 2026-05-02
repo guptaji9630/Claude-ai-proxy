@@ -77,7 +77,12 @@ async function handleNIMRequest(
 
 /**
  * Handle streaming responses from NIM
- * Translates each chunk to Claude format
+ * Translates the NIM response into the Claude Server-Sent Events (SSE) format
+ * that Claude Code CLI and the Anthropic SDK expect.
+ *
+ * Claude SSE event order:
+ *   message_start → content_block_start → ping → content_block_delta(s)
+ *   → content_block_stop → message_delta → message_stop
  */
 async function handleNIMStream(
   client: any,
@@ -85,38 +90,81 @@ async function handleNIMStream(
   res: Response
 ): Promise<void> {
   try {
-    // Create a streaming request to NIM
-    const nimClient = (createNIMClient() as any).client || createNIMClient();
-
-    // We'll implement basic streaming support
-    // For now, we'll buffer the response (can be improved with true streaming later)
-    const response = await (nimClient as any).post('/v1/chat/completions', nimRequest, {
-      headers: {
-        'Authorization': `Bearer ${process.env.NVIDIA_NIM_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
+    // Fetch the full NIM response (buffered); true NIM streaming can be
+    // layered on top later without changing the SSE contract below.
+    const nimClient = createNIMClient();
+    const nimResponse = await nimClient.callNIM('/v1/chat/completions', {
+      ...nimRequest,
+      stream: false, // always buffer for now
     });
 
-    const claudeResponse = translateNIMToClaude(response.data as any);
+    const claudeResponse = translateNIMToClaude(nimResponse as any);
 
-    // For streaming, return each token as a separate event
-    // This is a simplified implementation
+    // --- Set up SSE headers ---
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // Send the full response as a single stream event for now
-    const streamEvent = {
-      type: 'content_block_delta',
-      index: 0,
-      delta: {
-        type: 'text_delta',
-        text: claudeResponse.content[0].text,
-      },
+    const writeEvent = (eventType: string, data: object) => {
+      res.write(`event: ${eventType}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
     };
 
-    res.write(`data: ${JSON.stringify(streamEvent)}\n\n`);
-    res.write('data: [DONE]\n\n');
+    // 1. message_start
+    writeEvent('message_start', {
+      type: 'message_start',
+      message: {
+        id: claudeResponse.id,
+        type: 'message',
+        role: 'assistant',
+        content: [],
+        model: claudeResponse.model,
+        stop_reason: null,
+        stop_sequence: null,
+        usage: {
+          input_tokens: claudeResponse.usage.input_tokens,
+          output_tokens: 0,
+        },
+      },
+    });
+
+    // 2. content_block_start
+    writeEvent('content_block_start', {
+      type: 'content_block_start',
+      index: 0,
+      content_block: { type: 'text', text: '' },
+    });
+
+    // 3. ping
+    writeEvent('ping', { type: 'ping' });
+
+    // 4. content_block_delta — send the full text as one delta
+    const text = claudeResponse.content[0]?.text ?? '';
+    writeEvent('content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text },
+    });
+
+    // 5. content_block_stop
+    writeEvent('content_block_stop', {
+      type: 'content_block_stop',
+      index: 0,
+    });
+
+    // 6. message_delta (stop_reason + final usage)
+    writeEvent('message_delta', {
+      type: 'message_delta',
+      delta: {
+        stop_reason: claudeResponse.stop_reason,
+        stop_sequence: null,
+      },
+      usage: { output_tokens: claudeResponse.usage.output_tokens },
+    });
+
+    // 7. message_stop
+    writeEvent('message_stop', { type: 'message_stop' });
+
     res.end();
   } catch (error) {
     if (!res.headersSent) {

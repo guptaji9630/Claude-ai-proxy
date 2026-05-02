@@ -33,7 +33,7 @@ echo OK - Proxy is running
 echo.
 
 REM Set environment variables
-set "ANTHROPIC_API_BASE_URL=http://localhost:3000"
+set "ANTHROPIC_BASE_URL=http://localhost:3000"
 set "ANTHROPIC_API_KEY=proxy-key"
 
 REM Default model (can be changed)
