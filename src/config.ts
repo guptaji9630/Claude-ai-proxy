@@ -18,13 +18,20 @@ export const config = {
 
 // Validate required environment variables
 export function validateConfig(): void {
-  const required = ['ANTHROPIC_API_KEY', 'NVIDIA_NIM_API_KEY'];
-  const missing = required.filter((key) => !process.env[key]);
-
-  if (missing.length > 0) {
+  // NVIDIA_NIM_API_KEY is always required (NIM is the primary backend)
+  if (!process.env.NVIDIA_NIM_API_KEY) {
     throw new Error(
-      `Missing required environment variables: ${missing.join(', ')}. ` +
-      `Please check your .env file or set them in your deployment environment.`
+      'Missing required environment variable: NVIDIA_NIM_API_KEY. ' +
+      'Please check your .env file or set it in your deployment environment.'
+    );
+  }
+
+  // ANTHROPIC_API_KEY is only needed when routing requests to the real Claude API
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn(
+      'Warning: ANTHROPIC_API_KEY is not set. ' +
+      'Requests routed to Claude models will fail. ' +
+      'This is fine if you only intend to use NVIDIA NIM models.'
     );
   }
 }
